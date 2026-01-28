@@ -22,15 +22,9 @@ const (
 )
 
 var (
-	focusedStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
-	blurredStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	cursorStyle         = focusedStyle
-	noStyle             = lipgloss.NewStyle()
-	helpStyle           = blurredStyle
-	cursorModeHelpStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-
-	focusedButton = focusedStyle.Render("[ Submit ]")
-	blurredButton = fmt.Sprintf("[ %s ]", blurredStyle.Render("Submit"))
+	focusedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	noStyle       = lipgloss.NewStyle()
+	selectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("202"))
 )
 
 type listItem struct {
@@ -89,7 +83,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					newItems = append(newItems, item)
 				}
 			}
-			m.cursor--
+			m.cursor = len(newItems) - 1
 			m.items = newItems
 
 		case "tab", "shift+tab", "up", "down":
@@ -159,11 +153,13 @@ func (m model) View() string {
 
 	// Iterate over our choices
 	for i, item := range m.items {
+		style := noStyle
 
 		// Is the cursor pointing at this item?
 		c := " " // no cursor
 		if m.cursor == i {
 			c = ">" // cursor!
+			style = selectedStyle
 		}
 
 		// Is this item selected?
@@ -173,7 +169,7 @@ func (m model) View() string {
 		}
 
 		// Render the row
-		s += fmt.Sprintf("%s [%s] %s\n", c, checked, item.Item)
+		s += style.Render(fmt.Sprintf("%s [%s] %s\n", c, checked, item.Item))
 	}
 
 	s += "\n" + m.textInput.View()
