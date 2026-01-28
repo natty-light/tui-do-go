@@ -75,13 +75,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
-			if msg.String() == "q" && m.cursor != len(m.items) {
-				m.SaveItems()
-				return m, tea.Quit
-			} else if msg.String() == "ctrl+c" {
-				m.SaveItems()
-				return m, tea.Quit
+			if msg.String() == "q" && m.cursor == len(m.items) {
+				break
 			}
+			m.SaveItems()
+			return m, tea.Quit
 		case "tab", "shift+tab", "up", "down":
 			s := msg.String()
 			if s == "up" || s == "shift+tab" {
