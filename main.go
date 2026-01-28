@@ -25,18 +25,16 @@ type listItem struct {
 }
 
 type model struct {
-	items    []listItem
-	cursor   int
-	selected map[int]struct{}
+	items  []listItem
+	cursor int
 }
 
 func initialModel() model {
 	m := model{
-		items:    make([]listItem, 0),
-		cursor:   0,
-		selected: make(map[int]struct{}),
+		items:  make([]listItem, 0),
+		cursor: 0,
 	}
-	m.LoadItems()
+	m.items = loadItems()
 
 	return m
 }
@@ -75,11 +73,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The "enter" key and the spacebar (a literal space) toggle
 		// the selected state for the item that the cursor is pointing at.
 		case "enter", " ":
-			_, ok := m.selected[m.cursor]
-			if ok {
-				delete(m.selected, m.cursor)
+			completed := m.items[m.cursor].Completed
+			if completed {
+				m.items[m.cursor].Completed = false
 			} else {
-				m.selected[m.cursor] = struct{}{}
+				m.items[m.cursor].Completed = true
 			}
 		}
 	}
@@ -104,7 +102,7 @@ func (m model) View() string {
 
 		// Is this item selected?
 		checked := " " // not selected
-		if _, ok := m.selected[i]; ok {
+		if m.items[i].Completed {
 			checked = "x" // selected!
 		}
 
@@ -153,7 +151,7 @@ func (m model) SaveItems() {
 	}
 }
 
-func (m model) LoadItems() {
+func loadItems() []listItem {
 	items := make([]listItem, 0)
 
 	homeDir, err := os.UserHomeDir()
@@ -167,22 +165,19 @@ func (m model) LoadItems() {
 	if err != nil {
 		if os.IsNotExist(err) {
 			// No file yet: start with an empty list
-			m.items = items
-			return
+			return items
 		}
 		log.Fatal(err)
 	}
 
 	// Allow empty files to be treated as empty lists
 	if len(data) == 0 {
-		m.items = items
-		return
+		return items
 	}
 
 	if err := json.Unmarshal(data, &items); err != nil {
 		log.Fatal(err)
 	}
 
-	fmt.Printf("Loaded %d items\n", len(items))
-	m.items = items
+	return items
 }
