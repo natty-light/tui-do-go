@@ -64,7 +64,6 @@ func initialModel() model {
 }
 
 func (m model) Init() tea.Cmd {
-	// Just return `nil`, which means "no I/O right now, please."
 	return textinput.Blink
 }
 
@@ -94,15 +93,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor = len(m.items)
 			}
 
-			for i := 0; i <= len(m.items); i++ {
-				if i == m.cursor {
-					// Set focused state
-					cmd = m.textInput.Focus()
-					m.textInput.PromptStyle = focusedStyle
-					m.textInput.TextStyle = focusedStyle
-					continue
-				}
-				// Remove focused state
+			if len(m.items) == m.cursor {
+				cmd = m.textInput.Focus()
+				m.textInput.PromptStyle = focusedStyle
+				m.textInput.TextStyle = focusedStyle
+
+			} else {
 				m.textInput.Blur()
 				m.textInput.PromptStyle = noStyle
 				m.textInput.TextStyle = noStyle
@@ -147,9 +143,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() string {
-	// The header
 	s := "Your Tui-Dos\n\n"
-	s += fmt.Sprintf("Cursor: %d\n\n", m.cursor)
 
 	// Iterate over our choices
 	for i, item := range m.items {
@@ -173,18 +167,10 @@ func (m model) View() string {
 	s += "\n" + m.textInput.View()
 
 	// The footer
-	s += "\nPress q to quit.\n"
+	s += "\nPress q or ctrl+c to quit.\n"
 
 	// Send the UI for rendering
 	return s
-}
-
-func main() {
-	p := tea.NewProgram(initialModel())
-	if _, err := p.Run(); err != nil {
-		fmt.Printf("Alas, there's been an error: %v", err)
-		os.Exit(1)
-	}
 }
 
 func (m model) SaveItems() {
@@ -210,6 +196,18 @@ func (m model) SaveItems() {
 
 	if err := os.WriteFile(filepath.Join(dataDir, fileName), asStr, 0o644); err != nil {
 		fmt.Printf("Alas, there's been an error: %v", err)
+	}
+}
+
+func (m model) ToggleItem() {
+
+}
+
+func main() {
+	p := tea.NewProgram(initialModel())
+	if _, err := p.Run(); err != nil {
+		fmt.Printf("Alas, there's been an error: %v", err)
+		os.Exit(1)
 	}
 }
 
