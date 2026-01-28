@@ -79,6 +79,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.SaveItems()
 			return m, tea.Quit
+		case "d":
+			if m.cursor == len(m.items) {
+				break
+			}
+			newItems := make([]listItem, 0)
+			for i, item := range m.items {
+				if i != m.cursor {
+					newItems = append(newItems, item)
+				}
+			}
+			m.cursor--
+			m.items = newItems
+
 		case "tab", "shift+tab", "up", "down":
 			s := msg.String()
 			if s == "up" || s == "shift+tab" {
@@ -97,7 +110,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmd = m.textInput.Focus()
 				m.textInput.PromptStyle = focusedStyle
 				m.textInput.TextStyle = focusedStyle
-
 			} else {
 				m.textInput.Blur()
 				m.textInput.PromptStyle = noStyle
