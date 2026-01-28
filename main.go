@@ -11,12 +11,26 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 const (
 	dirName  = ".tui-do"
 	fileName = ".tui-do.json"
+)
+
+var (
+	focusedStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	blurredStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	cursorStyle         = focusedStyle
+	noStyle             = lipgloss.NewStyle()
+	helpStyle           = blurredStyle
+	cursorModeHelpStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+
+	focusedButton = focusedStyle.Render("[ Submit ]")
+	blurredButton = fmt.Sprintf("[ %s ]", blurredStyle.Render("Submit"))
 )
 
 type listItem struct {
@@ -25,79 +39,107 @@ type listItem struct {
 }
 
 type model struct {
-	items  []listItem
-	cursor int
+	items     []listItem
+	cursor    int
+	textInput textinput.Model
 }
 
 func initialModel() model {
+	items := loadItems()
+
+	ti := textinput.New()
+	ti.Focus()
+	ti.CharLimit = 156
+	ti.Width = 20
+
 	m := model{
-		items:  make([]listItem, 0),
-		cursor: 0,
+		items:     items,
+		cursor:    0,
+		textInput: ti,
 	}
-	m.items = loadItems()
 
 	return m
 }
 
 func (m model) Init() tea.Cmd {
 	// Just return `nil`, which means "no I/O right now, please."
-	return nil
+	return textinput.Blink
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
 	switch msg := msg.(type) {
 
-	// Is it a key press?
 	case tea.KeyMsg:
-
-		// Cool, what was the actual key pressed?
-		switch msg.String() {
-
-		// These keys should exit the program.
-		case "ctrl+c", "q":
+		if msg.String() == "q" && m.cursor != len(m.items) {
 			m.SaveItems()
 			return m, tea.Quit
+		}
 
-		// The "up" and "k" keys move the cursor up
-		case "up", "k":
-			if m.cursor > 0 {
-				m.cursor--
+		switch msg.String() {
+		case "ctrl+c", "q":
+			if m.cursor != len(m.items) {
+				m.SaveItems()
+				return m, tea.Quit
 			}
-
-		// The "down" and "j" keys move the cursor down
-		case "down", "j":
-			if m.cursor < len(m.items)-1 {
+		case "tab", "shift+tab", "up", "down":
+			s := msg.String()
+			if s == "up" || s == "shift+tab" {
+				m.cursor--
+			} else {
 				m.cursor++
 			}
 
-		// The "enter" key and the spacebar (a literal space) toggle
-		// the selected state for the item that the cursor is pointing at.
+			if m.cursor > len(m.items) {
+				m.cursor = 0
+			} else if m.cursor < 0 {
+				m.cursor = len(m.items)
+			}
+
+			for i := 0; i <= len(m.items); i++ {
+				if i == m.cursor {
+					// Set focused state
+					cmd = m.textInput.Focus()
+					m.textInput.PromptStyle = focusedStyle
+					m.textInput.TextStyle = focusedStyle
+					continue
+				}
+				// Remove focused state
+				m.textInput.Blur()
+				m.textInput.PromptStyle = noStyle
+				m.textInput.TextStyle = noStyle
+			}
+
+			return m, cmd
+
 		case "enter", " ":
-			completed := m.items[m.cursor].Completed
-			if completed {
-				m.items[m.cursor].Completed = false
-			} else {
-				m.items[m.cursor].Completed = true
+			if m.cursor != len(m.items) {
+				completed := m.items[m.cursor].Completed
+				if completed {
+					m.items[m.cursor].Completed = false
+				} else {
+					m.items[m.cursor].Completed = true
+				}
 			}
 		}
 	}
 
-	// Return the updated model to the Bubble Tea runtime for processing.
-	// Note that we're not returning a command.
-	return m, nil
+	m.textInput, cmd = m.textInput.Update(msg)
+	return m, cmd
 }
 
 func (m model) View() string {
 	// The header
 	s := "Your Tui-Dos\n\n"
+	s += fmt.Sprintf("Cursor: %d\n\n", m.cursor)
 
 	// Iterate over our choices
 	for i, item := range m.items {
 
 		// Is the cursor pointing at this item?
-		cursor := " " // no cursor
+		c := " " // no cursor
 		if m.cursor == i {
-			cursor = ">" // cursor!
+			c = ">" // cursor!
 		}
 
 		// Is this item selected?
@@ -107,8 +149,10 @@ func (m model) View() string {
 		}
 
 		// Render the row
-		s += fmt.Sprintf("%s [%s] %s\n", cursor, checked, item.Item)
+		s += fmt.Sprintf("%s [%s] %s\n", c, checked, item.Item)
 	}
+
+	s += "\n" + m.textInput.View()
 
 	// The footer
 	s += "\nPress q to quit.\n"
