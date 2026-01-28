@@ -51,10 +51,12 @@ func initialModel() model {
 	ti.Focus()
 	ti.CharLimit = 156
 	ti.Width = 20
+	ti.PromptStyle = focusedStyle
+	ti.TextStyle = focusedStyle
 
 	m := model{
 		items:     items,
-		cursor:    0,
+		cursor:    len(items),
 		textInput: ti,
 	}
 
@@ -71,14 +73,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
 	case tea.KeyMsg:
-		if msg.String() == "q" && m.cursor != len(m.items) {
-			m.SaveItems()
-			return m, tea.Quit
-		}
-
 		switch msg.String() {
 		case "ctrl+c", "q":
-			if m.cursor != len(m.items) {
+			if msg.String() == "q" && m.cursor != len(m.items) {
+				m.SaveItems()
+				return m, tea.Quit
+			} else if msg.String() == "ctrl+c" {
 				m.SaveItems()
 				return m, tea.Quit
 			}
@@ -112,7 +112,27 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			return m, cmd
 
-		case "enter", " ":
+		case "enter":
+			if m.cursor != len(m.items) {
+				completed := m.items[m.cursor].Completed
+				if completed {
+					m.items[m.cursor].Completed = false
+				} else {
+					m.items[m.cursor].Completed = true
+				}
+			} else {
+				text := m.textInput.Value()
+				m.items = append(m.items, listItem{
+					Item:      text,
+					Completed: false,
+				})
+
+				m.cursor++
+				m.textInput.SetValue("")
+
+				return m, textinput.Blink
+			}
+		case " ":
 			if m.cursor != len(m.items) {
 				completed := m.items[m.cursor].Completed
 				if completed {
