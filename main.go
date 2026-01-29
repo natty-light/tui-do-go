@@ -49,6 +49,7 @@ type model struct {
 	textInput        textinput.Model
 	newListTextInput textinput.Model
 	listStartOffset  int
+	warning          string
 }
 
 type screenItemKind int
@@ -113,6 +114,7 @@ func initialModel() *model {
 		textInput:        ti,
 		listStartOffset:  listStartOffset,
 		newListTextInput: newListTi,
+		warning:          "",
 	}
 
 	// Set initial focus/styles based on whether we have any lists
@@ -162,6 +164,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
 	case tea.KeyMsg:
+		m.warning = ""
 		switch msg.String() {
 		case "ctrl+c", "q":
 			if msg.String() == "q" && itemCursor == numItems && numKeys > 0 {
@@ -295,6 +298,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Add a new list when cursor is at the new-list input
 			if m.cursor == newListIdx {
 				text := strings.TrimSpace(m.newListTextInput.Value())
+				_, exists := m.lists[text]
+				if exists {
+					m.warning = lipgloss.NewStyle().Foreground(lipgloss.Color("150")).Render("list with this name already exists")
+					break
+				}
 				if text == "" {
 					break
 				}
@@ -333,8 +341,6 @@ func (m *model) View() string {
 	s := "Your Tui-Dos\n\n"
 
 	items := m.screenItems()
-
-	s += fmt.Sprintf("items: %d  cursor: %d\n\n", len(items), m.cursor)
 	for i, si := range items {
 		switch si.kind {
 		case kindKey:
@@ -365,7 +371,7 @@ func (m *model) View() string {
 		case kindNewItem:
 			s += "\n\n" + m.textInput.View()
 		case kindNewList:
-			s += "\n\nAdd a new list: " + m.newListTextInput.View()
+			s += "\n\nAdd a new list: " + m.newListTextInput.View() + fmt.Sprintf("\t%s", m.warning)
 		}
 	}
 
