@@ -66,7 +66,7 @@ type screenItem struct {
 	itemIdx int // for list items
 }
 
-func (m model) screenItems() []screenItem {
+func (m *model) screenItems() []screenItem {
 	items := make([]screenItem, 0)
 	for i := range m.keys {
 		items = append(items, screenItem{kind: kindKey, keyIdx: i})
@@ -79,28 +79,24 @@ func (m model) screenItems() []screenItem {
 		}
 	}
 
-	items = append(items, screenItem{kind: kindNewItem})
+	if len(m.keys) > 0 {
+		items = append(items, screenItem{kind: kindNewItem})
+	}
 	items = append(items, screenItem{kind: kindNewList})
 	return items
 }
 
-func initialModel() model {
+func initialModel() *model {
 	lists, keys := loadItems()
 	selectedList := 0
 
 	ti := textinput.New()
-	ti.Focus()
 	ti.CharLimit = 156
 	ti.Width = 20
-	ti.PromptStyle = focusedStyle
-	ti.TextStyle = focusedStyle
 
 	newListTi := textinput.New()
-	newListTi.Blur()
 	newListTi.CharLimit = 156
 	newListTi.Width = 20
-	newListTi.PromptStyle = noStyle
-	newListTi.TextStyle = noStyle
 
 	listStartOffset := len(keys)
 
@@ -119,14 +115,25 @@ func initialModel() model {
 		newListTextInput: newListTi,
 	}
 
-	return m
+	// Set initial focus/styles based on whether we have any lists
+	if len(keys) > 0 {
+		// Focus new-item input
+		m.focusTextInput()
+		m.blurListTextInput()
+	} else {
+		// No lists yet: focus new-list input
+		m.focusListTextInput()
+		m.blurTextInput()
+	}
+
+	return &m
 }
 
-func (m model) Init() tea.Cmd {
+func (m *model) Init() tea.Cmd {
 	return textinput.Blink
 }
 
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	var newListCmd tea.Cmd
 
@@ -138,7 +145,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	numItems := len(items)
 
-	total := numKeys + numItems + 1 + 1 // new item input, new list input
+	inputsCount := 1
+	if numKeys > 0 {
+		inputsCount = 2
+	}
+
+	total := numKeys + numItems + inputsCount
+	newListIdx := total - 1
+	newItemIdx := -1
+	if inputsCount == 2 {
+		newItemIdx = total - 2
+	}
+
 	itemCursor := m.getItemCursor()
 
 	switch msg := msg.(type) {
@@ -149,9 +167,61 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.String() == "q" && itemCursor == numItems && numKeys > 0 {
 				break
 			}
-			//m.SaveItems()
+			m.SaveItems()
 			return m, tea.Quit
 		case "d":
+			// Deleting a list key or an item depending on cursor position
+			if m.cursor < numKeys {
+				// Delete the key at cursor (including if it's the selected list)
+				deleteKeyIdx := m.cursor
+				deleteKey := m.keys[deleteKeyIdx]
+
+				// Build new keys slice without the deleted key
+				newKeys := make([]string, 0, numKeys-1)
+				for i, key := range m.keys {
+					if i != deleteKeyIdx {
+						newKeys = append(newKeys, key)
+					}
+				}
+				// Remove the list from the map to avoid orphans
+				delete(m.lists, deleteKey)
+
+				// Update selection based on which key was deleted
+				if len(newKeys) == 0 {
+					m.keys = newKeys
+					m.selectedList = 0
+					m.listStartOffset = 0
+					m.cursor = 0
+					// Focus new-list input when there are no lists
+					m.blurTextInput()
+					newListCmd = m.focusListTextInput()
+					return m, tea.Batch(cmd, newListCmd, textinput.Blink)
+				}
+
+				// There are still lists
+				// Adjust selectedList considering index shift
+				if deleteKeyIdx == m.selectedList {
+					// Move to previous list (or stay at 0 if first was deleted)
+					m.selectedList = deleteKeyIdx - 1
+					if m.selectedList < 0 {
+						m.selectedList = 0
+					}
+				} else if deleteKeyIdx < m.selectedList {
+					// Shift left because indices after deletion move
+					m.selectedList--
+				}
+
+				m.keys = newKeys
+				numKeys = len(newKeys)
+				m.listStartOffset = numKeys
+				// Keep cursor on the (new) selected key
+				m.cursor = m.selectedList
+				// Blur inputs when on keys
+				m.blurTextInput()
+				m.blurListTextInput()
+				return m, cmd
+			}
+
 			// Only delete when cursor is on a valid item (not keys or input)
 			if itemCursor < 0 || itemCursor >= numItems {
 				break
@@ -174,29 +244,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor++
 			}
 
-			if m.cursor == total-2 { // new item input
-				cmd = m.textInput.Focus()
-				m.textInput.PromptStyle = focusedStyle
-				m.textInput.TextStyle = focusedStyle
-
-				m.newListTextInput.Blur()
-				m.newListTextInput.TextStyle = noStyle
-				m.newListTextInput.PromptStyle = noStyle
-			} else if m.cursor == total-1 {
-				cmd = m.newListTextInput.Focus()
-				m.newListTextInput.PromptStyle = focusedStyle
-				m.newListTextInput.TextStyle = focusedStyle
-
-				m.textInput.PromptStyle = noStyle
-				m.textInput.TextStyle = noStyle
-				m.textInput.Blur()
+			if newItemIdx >= 0 && m.cursor == newItemIdx {
+				cmd = tea.Batch(m.focusTextInput(), textinput.Blink)
+				m.blurListTextInput()
+			} else if m.cursor == newListIdx {
+				cmd = tea.Batch(m.focusListTextInput(), textinput.Blink)
+				m.blurTextInput()
 			} else {
-				m.textInput.Blur()
-				m.newListTextInput.Blur()
-				m.textInput.PromptStyle = noStyle
-				m.textInput.TextStyle = noStyle
-				m.newListTextInput.PromptStyle = noStyle
-				m.newListTextInput.TextStyle = noStyle
+				m.blurListTextInput()
+				m.blurTextInput()
 			}
 
 			// Wrap across all on-screen elements: keys + items + input
@@ -220,8 +276,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.lists[m.keys[m.selectedList]][itemCursor].Completed = !completed
 				break
 			}
-			// If on input, add a new item
-			if itemCursor == numItems {
+			// Add a new item only when lists exist and cursor is at the new-item input
+			if newItemIdx >= 0 && m.cursor == newItemIdx {
 				text := strings.TrimSpace(m.textInput.Value())
 				if text == "" {
 					break
@@ -230,24 +286,34 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					Item:      text,
 					Completed: false,
 				})
+				// Stay on the new-item input for rapid entry
 				m.cursor++
 				m.textInput.SetValue("")
 				return m, textinput.Blink
 			}
 
-			if itemCursor > numItems {
+			// Add a new list when cursor is at the new-list input
+			if m.cursor == newListIdx {
 				text := strings.TrimSpace(m.newListTextInput.Value())
 				if text == "" {
 					break
 				}
-
 				m.keys = append(m.keys, text)
-				m.selectedList++
-				m.listStartOffset++
 				m.lists[text] = make([]listItem, 0)
-				m.cursor = len(m.keys)
+				// Select the newly created list
+				m.selectedList = len(m.keys) - 1
+				m.listStartOffset = len(m.keys)
+				// Place cursor onto the new-item input for the new list
+				m.cursor = m.listStartOffset // equals newItemIdx after recompute
 				m.newListTextInput.SetValue("")
-				return m, textinput.Blink
+				// Focus swap: new-item gets focus now
+				cmd = m.textInput.Focus()
+				m.textInput.PromptStyle = focusedStyle
+				m.textInput.TextStyle = focusedStyle
+				m.newListTextInput.Blur()
+				m.newListTextInput.PromptStyle = noStyle
+				m.newListTextInput.TextStyle = noStyle
+				return m, tea.Batch(cmd, textinput.Blink)
 			}
 		case " ":
 			// Only toggle when cursor is on a valid item
@@ -263,10 +329,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmd, newListCmd)
 }
 
-func (m model) View() string {
+func (m *model) View() string {
 	s := "Your Tui-Dos\n\n"
 
 	items := m.screenItems()
+
+	s += fmt.Sprintf("items: %d  cursor: %d\n\n", len(items), m.cursor)
 	for i, si := range items {
 		switch si.kind {
 		case kindKey:
@@ -306,7 +374,7 @@ func (m model) View() string {
 	return s
 }
 
-func (m model) SaveItems() {
+func (m *model) SaveItems() {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		fmt.Printf("Alas, there's been an error: %v", err)
@@ -335,12 +403,36 @@ func (m model) SaveItems() {
 	}
 }
 
-func (m model) setCursor(new int) {
+func (m *model) setCursor(new int) {
 	m.cursor = new + m.listStartOffset
 }
 
-func (m model) getItemCursor() int {
+func (m *model) getItemCursor() int {
 	return m.cursor - m.listStartOffset
+}
+
+func (m *model) blurTextInput() {
+	m.textInput.Blur()
+	m.textInput.TextStyle = noStyle
+	m.textInput.PromptStyle = noStyle
+}
+
+func (m *model) blurListTextInput() {
+	m.newListTextInput.Blur()
+	m.newListTextInput.TextStyle = noStyle
+	m.newListTextInput.PromptStyle = noStyle
+}
+
+func (m *model) focusTextInput() tea.Cmd {
+	m.textInput.PromptStyle = focusedStyle
+	m.textInput.TextStyle = focusedStyle
+	return m.textInput.Focus()
+}
+
+func (m *model) focusListTextInput() tea.Cmd {
+	m.newListTextInput.TextStyle = focusedStyle
+	m.newListTextInput.PromptStyle = focusedStyle
+	return m.newListTextInput.Focus()
 }
 
 func main() {
