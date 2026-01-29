@@ -19,12 +19,15 @@ import (
 const (
 	dirName  = ".tui-do"
 	fileName = ".tui-do.json"
+
+	footer = "\nPress q or ctrl+c to quit.\n"
 )
 
 var (
-	focusedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
-	noStyle       = lipgloss.NewStyle()
-	selectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("202"))
+	focusedStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	noStyle          = lipgloss.NewStyle()
+	selectedStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("202"))
+	currentListStyle = lipgloss.NewStyle().Background(lipgloss.Color("202"))
 )
 
 type listItem struct {
@@ -32,14 +35,22 @@ type listItem struct {
 	Completed bool   `json:"completed"`
 }
 
+type jsonData struct {
+	Keys  []string              `json:"keys"`
+	Lists map[string][]listItem `json:"lists"`
+}
+
 type model struct {
-	items     []listItem
-	cursor    int
-	textInput textinput.Model
+	lists        map[string][]listItem
+	keys         []string
+	selectedList int
+	cursor       int
+	textInput    textinput.Model
 }
 
 func initialModel() model {
-	items := loadItems()
+	lists, keys := loadItems()
+	selectedList := 0
 
 	ti := textinput.New()
 	ti.Focus()
@@ -48,10 +59,17 @@ func initialModel() model {
 	ti.PromptStyle = focusedStyle
 	ti.TextStyle = focusedStyle
 
+	cursor := 0
+	if len(keys) > 0 {
+		cursor = len(lists[keys[selectedList]])
+	}
+
 	m := model{
-		items:     items,
-		cursor:    len(items),
-		textInput: ti,
+		lists:        lists,
+		selectedList: selectedList,
+		keys:         keys,
+		cursor:       cursor,
+		textInput:    ti,
 	}
 
 	return m
@@ -63,28 +81,37 @@ func (m model) Init() tea.Cmd {
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
+
+	numKeys := len(m.keys)
+
+	items := make([]listItem, 0)
+	if numKeys > 0 {
+		items = m.lists[m.keys[m.selectedList]]
+	}
+	numItems := len(items)
+
 	switch msg := msg.(type) {
 
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
-			if msg.String() == "q" && m.cursor == len(m.items) {
+			if msg.String() == "q" && m.cursor == numItems && numKeys > 0 {
 				break
 			}
 			m.SaveItems()
 			return m, tea.Quit
 		case "d":
-			if m.cursor == len(m.items) {
+			if m.cursor == numItems {
 				break
 			}
 			newItems := make([]listItem, 0)
-			for i, item := range m.items {
+			for i, item := range items {
 				if i != m.cursor {
 					newItems = append(newItems, item)
 				}
 			}
 			m.cursor = len(newItems) - 1
-			m.items = newItems
+			items = newItems
 
 		case "tab", "shift+tab", "up", "down":
 			s := msg.String()
@@ -94,13 +121,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor++
 			}
 
-			if m.cursor > len(m.items) {
+			if m.cursor > len(items) {
 				m.cursor = 0
 			} else if m.cursor < 0 {
-				m.cursor = len(m.items)
+				m.cursor = len(items)
 			}
 
-			if len(m.items) == m.cursor {
+			if numItems == m.cursor {
 				cmd = m.textInput.Focus()
 				m.textInput.PromptStyle = focusedStyle
 				m.textInput.TextStyle = focusedStyle
@@ -113,16 +140,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 
 		case "enter":
-			if m.cursor != len(m.items) {
-				completed := m.items[m.cursor].Completed
+			if m.cursor != numItems {
+				completed := items[m.cursor].Completed
 				if completed {
-					m.items[m.cursor].Completed = false
+					m.lists[m.keys[m.selectedList]][m.cursor].Completed = false
 				} else {
-					m.items[m.cursor].Completed = true
+					m.lists[m.keys[m.selectedList]][m.cursor].Completed = true
 				}
 			} else {
 				text := m.textInput.Value()
-				m.items = append(m.items, listItem{
+				m.lists[m.keys[m.selectedList]] = append(items, listItem{
 					Item:      text,
 					Completed: false,
 				})
@@ -133,12 +160,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, textinput.Blink
 			}
 		case " ":
-			if m.cursor != len(m.items) {
-				completed := m.items[m.cursor].Completed
+			if m.cursor != numItems {
+				completed := items[m.cursor].Completed
 				if completed {
-					m.items[m.cursor].Completed = false
+					m.lists[m.keys[m.selectedList]][m.cursor].Completed = false
 				} else {
-					m.items[m.cursor].Completed = true
+					m.lists[m.keys[m.selectedList]][m.cursor].Completed = true
 				}
 			}
 		}
@@ -151,8 +178,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) View() string {
 	s := "Your Tui-Dos\n\n"
 
+	if len(m.keys) == 0 {
+		s += "add a new list\n\n"
+		s += footer
+		return s
+	}
+
+	for idx, _ := range m.keys {
+		key := m.keys[idx]
+		if m.selectedList == idx {
+			s += currentListStyle.Render(key) + "\t"
+		} else {
+			s += fmt.Sprintf("%s\t", key)
+		}
+	}
+	s += "\n\n"
+
 	// Iterate over our choices
-	for i, item := range m.items {
+	for i, item := range m.lists[m.keys[m.selectedList]] {
 		style := noStyle
 
 		// Is the cursor pointing at this item?
@@ -164,18 +207,19 @@ func (m model) View() string {
 
 		// Is this item selected?
 		checked := " " // not selected
-		if m.items[i].Completed {
+		if item.Completed {
 			checked = "x" // selected!
 		}
 
 		// Render the row
-		s += style.Render(fmt.Sprintf("%s [%s] %s\n", c, checked, item.Item))
+		s += style.Render(fmt.Sprintf("%s [%s] %s", c, checked, item.Item))
+		s += "\n"
 	}
 
 	s += "\n" + m.textInput.View()
 
 	// The footer
-	s += "\nPress q or ctrl+c to quit.\n"
+	s += footer
 
 	// Send the UI for rendering
 	return s
@@ -195,8 +239,11 @@ func (m model) SaveItems() {
 		os.Exit(1)
 	}
 
-	// Marshal the full slice as a single JSON array
-	asStr, err := json.Marshal(m.items)
+	data := jsonData{
+		Keys:  m.keys,
+		Lists: m.lists,
+	}
+	asStr, err := json.Marshal(data)
 	if err != nil {
 		fmt.Printf("Alas, there's been an error: %v", err)
 		os.Exit(1)
@@ -219,8 +266,8 @@ func main() {
 	}
 }
 
-func loadItems() []listItem {
-	items := make([]listItem, 0)
+func loadItems() (map[string][]listItem, []string) {
+	data := &jsonData{}
 
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -229,23 +276,25 @@ func loadItems() []listItem {
 
 	filePath := filepath.Join(homeDir, dirName, fileName)
 	// Read the whole file at once; the file contains a single JSON array
-	data, err := os.ReadFile(filePath)
+	contents, err := os.ReadFile(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// No file yet: start with an empty list
-			return items
+			return make(map[string][]listItem), []string{}
 		}
 		log.Fatal(err)
 	}
 
 	// Allow empty files to be treated as empty lists
-	if len(data) == 0 {
-		return items
+	if len(contents) == 0 {
+		return make(map[string][]listItem), []string{}
 	}
 
-	if err := json.Unmarshal(data, &items); err != nil {
+	if err := json.Unmarshal(contents, &data); err != nil {
 		log.Fatal(err)
 	}
+	lists := data.Lists
+	keys := data.Keys
 
-	return items
+	return lists, keys
 }
