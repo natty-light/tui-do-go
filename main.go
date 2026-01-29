@@ -25,10 +25,10 @@ const (
 )
 
 var (
-	focusedStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
-	noStyle          = lipgloss.NewStyle()
-	selectedStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("202"))
-	currentListStyle = lipgloss.NewStyle().Background(lipgloss.Color("202"))
+	focusedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	noStyle       = lipgloss.NewStyle()
+	selectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("202"))
+	buttonStyle   = lipgloss.NewStyle().Background(lipgloss.Color("15")).Foreground(lipgloss.Color("0"))
 )
 
 type listItem struct {
@@ -42,12 +42,13 @@ type jsonData struct {
 }
 
 type model struct {
-	lists           map[string][]listItem
-	keys            []string
-	selectedList    int
-	cursor          int
-	textInput       textinput.Model
-	listStartOffset int
+	lists            map[string][]listItem
+	keys             []string
+	selectedList     int
+	cursor           int
+	textInput        textinput.Model
+	newListTextInput textinput.Model
+	listStartOffset  int
 }
 
 type screenItemKind int
@@ -55,29 +56,31 @@ type screenItemKind int
 const (
 	kindKey screenItemKind = iota
 	kindItem
-	kindInput
+	kindNewItem
+	kindNewList
 )
 
 type screenItem struct {
-	kind      screenItemKind
-	keyIndex  int // for keys row
-	itemIndex int // for list items
+	kind    screenItemKind
+	keyIdx  int // for keys row
+	itemIdx int // for list items
 }
 
 func (m model) screenItems() []screenItem {
 	items := make([]screenItem, 0)
 	for i := range m.keys {
-		items = append(items, screenItem{kind: kindKey, keyIndex: i})
+		items = append(items, screenItem{kind: kindKey, keyIdx: i})
 	}
 
 	if len(m.keys) > 0 {
 		lst := m.lists[m.keys[m.selectedList]]
 		for i := range lst {
-			items = append(items, screenItem{kind: kindItem, itemIndex: i})
+			items = append(items, screenItem{kind: kindItem, itemIdx: i})
 		}
 	}
 
-	items = append(items, screenItem{kind: kindInput})
+	items = append(items, screenItem{kind: kindNewItem})
+	items = append(items, screenItem{kind: kindNewList})
 	return items
 }
 
@@ -92,6 +95,13 @@ func initialModel() model {
 	ti.PromptStyle = focusedStyle
 	ti.TextStyle = focusedStyle
 
+	newListTi := textinput.New()
+	newListTi.Blur()
+	newListTi.CharLimit = 156
+	newListTi.Width = 20
+	newListTi.PromptStyle = noStyle
+	newListTi.TextStyle = noStyle
+
 	listStartOffset := len(keys)
 
 	cursor := 0
@@ -100,12 +110,13 @@ func initialModel() model {
 	}
 
 	m := model{
-		lists:           lists,
-		selectedList:    selectedList,
-		keys:            keys,
-		cursor:          cursor,
-		textInput:       ti,
-		listStartOffset: listStartOffset,
+		lists:            lists,
+		selectedList:     selectedList,
+		keys:             keys,
+		cursor:           cursor,
+		textInput:        ti,
+		listStartOffset:  listStartOffset,
+		newListTextInput: newListTi,
 	}
 
 	return m
@@ -117,6 +128,7 @@ func (m model) Init() tea.Cmd {
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
+	var newListCmd tea.Cmd
 
 	numKeys := len(m.keys)
 
@@ -126,7 +138,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	numItems := len(items)
 
-	total := numKeys + numItems + 1
+	total := numKeys + numItems + 1 + 1 // new item input, new list input
 	itemCursor := m.getItemCursor()
 
 	switch msg := msg.(type) {
@@ -137,7 +149,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.String() == "q" && itemCursor == numItems && numKeys > 0 {
 				break
 			}
-			m.SaveItems()
+			//m.SaveItems()
 			return m, tea.Quit
 		case "d":
 			// Only delete when cursor is on a valid item (not keys or input)
@@ -162,22 +174,36 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor++
 			}
 
+			if m.cursor == total-2 { // new item input
+				cmd = m.textInput.Focus()
+				m.textInput.PromptStyle = focusedStyle
+				m.textInput.TextStyle = focusedStyle
+
+				m.newListTextInput.Blur()
+				m.newListTextInput.TextStyle = noStyle
+				m.newListTextInput.PromptStyle = noStyle
+			} else if m.cursor == total-1 {
+				cmd = m.newListTextInput.Focus()
+				m.newListTextInput.PromptStyle = focusedStyle
+				m.newListTextInput.TextStyle = focusedStyle
+
+				m.textInput.PromptStyle = noStyle
+				m.textInput.TextStyle = noStyle
+				m.textInput.Blur()
+			} else {
+				m.textInput.Blur()
+				m.newListTextInput.Blur()
+				m.textInput.PromptStyle = noStyle
+				m.textInput.TextStyle = noStyle
+				m.newListTextInput.PromptStyle = noStyle
+				m.newListTextInput.TextStyle = noStyle
+			}
+
 			// Wrap across all on-screen elements: keys + items + input
 			if m.cursor >= total {
 				m.cursor = 0
 			} else if m.cursor < 0 {
 				m.cursor = total - 1
-			}
-
-			// Focus input when cursor is on it (last index)
-			if m.cursor == total-1 {
-				cmd = m.textInput.Focus()
-				m.textInput.PromptStyle = focusedStyle
-				m.textInput.TextStyle = focusedStyle
-			} else {
-				m.textInput.Blur()
-				m.textInput.PromptStyle = noStyle
-				m.textInput.TextStyle = noStyle
 			}
 
 			return m, cmd
@@ -208,6 +234,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.textInput.SetValue("")
 				return m, textinput.Blink
 			}
+
+			if itemCursor > numItems {
+				text := strings.TrimSpace(m.newListTextInput.Value())
+				if text == "" {
+					break
+				}
+
+				m.keys = append(m.keys, text)
+				m.selectedList++
+				m.listStartOffset++
+				m.lists[text] = make([]listItem, 0)
+				m.cursor = len(m.keys)
+				m.newListTextInput.SetValue("")
+				return m, textinput.Blink
+			}
 		case " ":
 			// Only toggle when cursor is on a valid item
 			if itemCursor >= 0 && itemCursor < numItems {
@@ -218,32 +259,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	m.textInput, cmd = m.textInput.Update(msg)
-	return m, cmd
+	m.newListTextInput, newListCmd = m.newListTextInput.Update(msg)
+	return m, tea.Batch(cmd, newListCmd)
 }
 
 func (m model) View() string {
 	s := "Your Tui-Dos\n\n"
 
-	// Build a unified view by iterating over all screen items
 	items := m.screenItems()
-	// First line: keys row (rendered in place as we iterate)
 	for i, si := range items {
 		switch si.kind {
 		case kindKey:
-			key := m.keys[si.keyIndex]
+			key := m.keys[si.keyIdx]
 			if m.cursor == i {
 				s += selectedStyle.Render(key) + "\t"
-			} else if m.selectedList == si.keyIndex {
-				s += currentListStyle.Render(key) + "\t"
+			} else if m.selectedList == si.keyIdx {
+				s += buttonStyle.Render(key) + "\t"
 			} else {
 				s += fmt.Sprintf("%s\t", key)
 			}
-			// Peek next kind to know when keys end to add spacing
 			if i+1 < len(items) && items[i+1].kind != kindKey {
 				s += "\n\n"
 			}
 		case kindItem:
-			item := m.lists[m.keys[m.selectedList]][si.itemIndex]
+			item := m.lists[m.keys[m.selectedList]][si.itemIdx]
 			style := noStyle
 			c := " "
 			if m.cursor == i {
@@ -255,16 +294,15 @@ func (m model) View() string {
 				checked = "x"
 			}
 			s += style.Render(fmt.Sprintf("%s [%s] %s", c, checked, item.Item)) + "\n"
-		case kindInput:
-			// After items, show input
-			s += "\n" + m.textInput.View()
+		case kindNewItem:
+			s += "\n\n" + m.textInput.View()
+		case kindNewList:
+			s += "\n\nAdd a new list: " + m.newListTextInput.View()
 		}
 	}
 
-	// The footer
 	s += footer
 
-	// Send the UI for rendering
 	return s
 }
 
