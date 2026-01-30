@@ -117,13 +117,10 @@ func initialModel() *model {
 		warning:          "",
 	}
 
-	// Set initial focus/styles based on whether we have any lists
-	if len(keys) > 0 {
-		// Focus new-item input
+	if len(keys) > 0 { // we have existing lists
 		m.focusTextInput()
 		m.blurListTextInput()
-	} else {
-		// No lists yet: focus new-list input
+	} else { // No lists yet: focus new-list input
 		m.focusListTextInput()
 		m.blurTextInput()
 	}
@@ -173,23 +170,20 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.SaveItems()
 			return m, tea.Quit
 		case "d":
-			// Deleting a list key or an item depending on cursor position
+			// on a key
 			if m.cursor < numKeys {
-				// Delete the key at cursor (including if it's the selected list)
 				deleteKeyIdx := m.cursor
 				deleteKey := m.keys[deleteKeyIdx]
 
-				// Build new keys slice without the deleted key
 				newKeys := make([]string, 0, numKeys-1)
 				for i, key := range m.keys {
 					if i != deleteKeyIdx {
 						newKeys = append(newKeys, key)
 					}
 				}
-				// Remove the list from the map to avoid orphans
 				delete(m.lists, deleteKey)
 
-				// Update selection based on which key was deleted
+				// handle case where we have no lists left
 				if len(newKeys) == 0 {
 					m.keys = newKeys
 					m.selectedList = 0
@@ -201,8 +195,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, tea.Batch(cmd, newListCmd, textinput.Blink)
 				}
 
-				// There are still lists
-				// Adjust selectedList considering index shift
 				if deleteKeyIdx == m.selectedList {
 					// Move to previous list (or stay at 0 if first was deleted)
 					m.selectedList = deleteKeyIdx - 1
@@ -225,7 +217,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, cmd
 			}
 
-			// Only delete when cursor is on a valid item (not keys or input)
+			// cursor is on an item
 			if itemCursor < 0 || itemCursor >= numItems {
 				break
 			}
@@ -235,7 +227,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					newItems = append(newItems, item)
 				}
 			}
-			m.setCursor(len(newItems) - 1)
+
+			if len(newItems) == 0 {
+				m.setCursor(0) // this should be the new list item idx
+			} else {
+				m.cursor-- // move back to previous item
+			}
+
+			// move cursor to previous item
 			items = newItems
 			m.lists[m.keys[m.selectedList]] = newItems
 
@@ -307,20 +306,17 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					break
 				}
 				m.keys = append(m.keys, text)
+				newKeysLen := len(m.keys)
 				m.lists[text] = make([]listItem, 0)
 				// Select the newly created list
-				m.selectedList = len(m.keys) - 1
-				m.listStartOffset = len(m.keys)
+				m.selectedList = newKeysLen - 1
+				m.listStartOffset = newKeysLen
 				// Place cursor onto the new-item input for the new list
 				m.cursor = m.listStartOffset // equals newItemIdx after recompute
 				m.newListTextInput.SetValue("")
 				// Focus swap: new-item gets focus now
-				cmd = m.textInput.Focus()
-				m.textInput.PromptStyle = focusedStyle
-				m.textInput.TextStyle = focusedStyle
-				m.newListTextInput.Blur()
-				m.newListTextInput.PromptStyle = noStyle
-				m.newListTextInput.TextStyle = noStyle
+				cmd = m.focusTextInput()
+				m.focusListTextInput()
 				return m, tea.Batch(cmd, textinput.Blink)
 			}
 		case " ":
@@ -383,14 +379,11 @@ func (m *model) View() string {
 func (m *model) SaveItems() {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		fmt.Printf("Alas, there's been an error: %v", err)
 		os.Exit(1)
 	}
 
 	dataDir := filepath.Join(homeDir, dirName)
-	// Ensure the data directory exists
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		fmt.Printf("Alas, there's been an error: %v", err)
+	if err = os.MkdirAll(dataDir, 0o755); err != nil {
 		os.Exit(1)
 	}
 
@@ -400,12 +393,11 @@ func (m *model) SaveItems() {
 	}
 	asStr, err := json.Marshal(data)
 	if err != nil {
-		fmt.Printf("Alas, there's been an error: %v", err)
 		os.Exit(1)
 	}
 
-	if err := os.WriteFile(filepath.Join(dataDir, fileName), asStr, 0o644); err != nil {
-		fmt.Printf("Alas, there's been an error: %v", err)
+	if err = os.WriteFile(filepath.Join(dataDir, fileName), asStr, 0o644); err != nil {
+		os.Exit(1)
 	}
 }
 
@@ -444,7 +436,6 @@ func (m *model) focusListTextInput() tea.Cmd {
 func main() {
 	p := tea.NewProgram(initialModel())
 	if _, err := p.Run(); err != nil {
-		fmt.Printf("Alas, there's been an error: %v", err)
 		os.Exit(1)
 	}
 }
@@ -458,17 +449,17 @@ func loadItems() (map[string][]listItem, []string) {
 	}
 
 	filePath := filepath.Join(homeDir, dirName, fileName)
-	// Read the whole file at once; the file contains a single JSON array
+
 	contents, err := os.ReadFile(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// No file yet: start with an empty list
+			// No file yet: start with fresh state
 			return make(map[string][]listItem), []string{}
 		}
 		log.Fatal(err)
 	}
 
-	// Allow empty files to be treated as empty lists
+	// Allow empty files to be treated as fresh state
 	if len(contents) == 0 {
 		return make(map[string][]listItem), []string{}
 	}
