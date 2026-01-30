@@ -316,7 +316,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.newListTextInput.SetValue("")
 				// Focus swap: new-item gets focus now
 				cmd = m.focusTextInput()
-				m.focusListTextInput()
+				m.blurListTextInput()
 				return m, tea.Batch(cmd, textinput.Blink)
 			}
 		case " ":
